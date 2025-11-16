@@ -936,18 +936,14 @@ if mode == "ولي الأمر":
         student_placeholder = "-- اختر الطالبة --"
 
         if selected_class != class_placeholder and all_classes:
-    for sid_key, info in _STUDENTS_INDEX.items():
-        if normalize_class(info["class"]) == selected_class:
-            # 👇 بدون الرقم المدني
-            label = info["name"]
-
-            # لو تكرّر الاسم، نضيف الصف للتمييز (بدون إظهار الرقم)
-            if label in sid_for_label:
-                label = f"{info['name']} - {info['class']}"
-
-            students_options.append(label)
-            sid_for_label[label] = sid_key
-
+            for sid_key, info in _STUDENTS_INDEX.items():
+                if normalize_class(info["class"]) == selected_class:
+                    # 👇 بدون الرقم المدني
+                    label = info["name"]
+                    if label in sid_for_label:
+                        label = f"{info['name']} - {info['class']}"
+                        students_options.append(label)
+                        sid_for_label[label] = sid_key
 
         selected_student_label = st.selectbox(
             "اسم الطالبة",
@@ -1158,5 +1154,6 @@ elif mode == "الإدارة":
         if st.button("🚪 تسجيل خروج الإدارة"):
             st.session_state.admin_logged_in = False
             st.rerun()
+
 
 
