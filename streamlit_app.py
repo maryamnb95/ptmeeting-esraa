@@ -24,7 +24,7 @@ INSTAGRAM_URL = "https://www.instagram.com/alesraa_highschool/"  # عدّلي ه
 INSTAGRAM_HANDLE = "@alesraa_highschool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_LOGO = os.path.join(BASE_DIR, "assets", "logo.PNG")
-DB_PATH = r"D:\PycharmProjects\PTmeeting\data\school.db"
+DB_PATH = os.path.join(BASE_DIR, "data", "school.db")
 
 # كلمة مرور الإدارة (غيّريها كما تريدين أو استخدمي متغير بيئة)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "israa123")
@@ -1151,3 +1151,4 @@ elif mode == "الإدارة":
         if st.button("🚪 تسجيل خروج الإدارة"):
             st.session_state.admin_logged_in = False
             st.rerun()
+
