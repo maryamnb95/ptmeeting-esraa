@@ -24,6 +24,7 @@ INSTAGRAM_URL = "https://www.instagram.com/alesraa_highschool/"
 INSTAGRAM_HANDLE = "@alesraa_highschool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_LOGO = os.path.join(BASE_DIR, "assets", "logo.PNG")
+MAP_IMAGE_PATH = os.path.join(BASE_DIR, "assets", "map.png")  # ← صورة مخطط المكان
 DB_PATH = os.path.join(BASE_DIR, "data", "school.db")
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "israa123")
@@ -309,7 +310,6 @@ def delete_parent_visit_by_ids(ids):
     cur.execute(f"DELETE FROM parent_visits WHERE id IN ({qmarks})", ids)
     conn.commit()
     conn.close()
-
 
 def delete_parent_note(student_id: str, subject: str):
     """حذف ملاحظة ولي أمر حسب الطالبة + المادة."""
@@ -627,7 +627,7 @@ try:
 except Exception as e:
     st.error(f"خطأ في تحميل قاعدة البيانات: {e}")
 
-# ========== CSS عام + موبايل + إخفاء Sidebar في الموبايل + Bottom Nav ==========
+# ========== CSS عام + موبايل ==========
 
 st.markdown("""
 <style>
@@ -782,16 +782,9 @@ textarea {
     .subtitle-main {
         font-size: 0.9rem;
     }
-
-    /* إخفاء Sidebar على الموبايل */
-    [data-testid="stSidebar"] {
-        display: none !important;
-    }
 }
 
-/* ... باقي الـ CSS فوقه خليه مثل ما هو ... */
-
-/* Footer Instagram عادي في أسفل الصفحة (مو ثابت) */
+/* Footer عادي في أسفل الصفحة */
 .footer-fixed {
     text-align: center;
     font-size: 0.9rem;
@@ -813,7 +806,6 @@ textarea {
     margin-left: 6px;
 }
 
-/* 📱 تصغير بسيط على الموبايل */
 @media (max-width: 768px) {
     .footer-fixed {
         font-size: 0.8rem;
@@ -825,7 +817,6 @@ textarea {
     }
 }
 
-/* مو محتاجين padding كبير تحت لأن الفوتر ما صار ثابت */
 .block-container {
     padding-bottom: 2rem;
 }
@@ -849,6 +840,8 @@ if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
 if "mode" not in st.session_state:
     st.session_state.mode = "ولي الأمر"
+if "show_map" not in st.session_state:
+    st.session_state.show_map = False  # ← حالة إظهار مخطط المكان
 
 # الشعار والعنوان
 def load_base64_image(path):
@@ -867,6 +860,37 @@ if os.path.exists(ASSETS_LOGO):
 st.markdown(f"<div class='title-main'>نظام عرض بيانات الطالب ومستوى الأداء</div>", unsafe_allow_html=True)
 st.markdown(f"<div class='subtitle-main'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
 st.caption(f"👩‍🎓 عدد الطالبات المحملة من القاعدة: {len(_STUDENTS_INDEX)}")
+
+# 🔍 زر عرض مخطط المكان أعلى المحتوى
+map_col, _ = st.columns([1, 4])
+with map_col:
+    if st.button("📍المخطط", type="secondary", key="open_map_btn"):
+        st.session_state.show_map = True
+
+# إذا تم تفعيل العرض نفتح Modal مع الصورة
+# إذا تم تفعيل العرض نعرض مودال HTML فوق الصفحة
+if st.session_state.show_map:
+    if os.path.exists(MAP_IMAGE_PATH):
+        map_b64 = load_base64_image(MAP_IMAGE_PATH)
+        st.markdown(
+            f"""
+            <div class="map-overlay">
+                <div class="map-modal">
+                    <img src="data:image/png;base64,{map_b64}" />
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.error("لم يتم العثور على صورة مخطط المكان داخل مجلد assets/")
+
+    # زر إغلاق حقيقي يطفّي الفلاج من الـ backend عشان ما يرجع المودال في التحديث الجاي
+    close_col, _ = st.columns([1, 4])
+    with close_col:
+        if st.button("❌إغلاق", key="close_map_btn"):
+            st.session_state.show_map = False
+            st.rerun()
 
 # وضع الاستخدام (Sidebar لسطح المكتب)
 with st.sidebar:
@@ -985,49 +1009,31 @@ if st.session_state.mode == "ولي الأمر":
                     st.session_state.logged_visit_sid = None
                     st.rerun()
 
-
     elif st.session_state.step >= 3:
 
         if not st.session_state.selected_sid or not st.session_state.current_record:
-
             st.error("لم يتم اختيار طالبة بعد. الرجاء الرجوع للخطوة السابقة.")
-
         else:
-
             sid = st.session_state.selected_sid
-
             rec = st.session_state.current_record
 
             # زر تغيير الطالبة داخل المحتوى
-
             col_btn, _ = st.columns([1, 4])
-
             with col_btn:
-
                 if st.button("⬅️ تغيير الطالبة", key="change_student_main", type="secondary", use_container_width=True):
                     st.session_state.step = 2
-
                     st.session_state.selected_sid = None
-
                     st.session_state.current_record = None
-
                     st.session_state.logged_visit_sid = None
-
                     st.rerun()
 
             # تسجيل زيارة ولي الأمر للطالبة (مرة واحدة لكل طالبة في الجلسة)
-
             if st.session_state.logged_visit_sid != sid:
                 log_parent_visit(
-
                     sid,
-
                     st.session_state.get("parent_name", ""),
-
                     st.session_state.get("parent_relation", "")
-
                 )
-
                 st.session_state.logged_visit_sid = sid
 
             st.markdown(
@@ -1250,7 +1256,8 @@ elif st.session_state.mode == "الإدارة":
         if st.button("🚪 تسجيل خروج الإدارة"):
             st.session_state.admin_logged_in = False
             st.rerun()
-# ===== فوتر ثابت في أسفل الصفحة (يظهر بعد كل المحتوى) =====
+
+# ===== فوتر في أسفل الصفحة =====
 st.markdown(
     f"""
 <div class="footer-fixed">
