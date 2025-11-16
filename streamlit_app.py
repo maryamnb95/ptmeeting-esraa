@@ -278,7 +278,7 @@ def load_parent_visits_df():
         )
     """)
     cur.execute("""
-        SELECT student_id, parent_name, parent_relation, created_at
+        SELECT id, student_id, parent_name, parent_relation, created_at
         FROM parent_visits
         ORDER BY created_at DESC
     """)
@@ -286,10 +286,11 @@ def load_parent_visits_df():
     conn.close()
 
     records = []
-    for sid, parent_name, parent_rel, created_at in rows:
+    for row_id, sid, parent_name, parent_rel, created_at in rows:
         sid_norm = normalize_sid(sid)
         info = _STUDENTS_INDEX.get(sid_norm, {})
         records.append({
+            "id": row_id,
             "student_id": sid_norm,
             "student_name": info.get("name", ""),
             "class": info.get("class", ""),
@@ -298,8 +299,31 @@ def load_parent_visits_df():
             "created_at": created_at
         })
     if not records:
-        return pd.DataFrame(columns=["student_id", "student_name", "class", "parent_name", "parent_relation", "created_at"])
+        return pd.DataFrame(columns=["id", "student_id", "student_name", "class", "parent_name", "parent_relation", "created_at"])
     return pd.DataFrame(records)
+
+def delete_parent_visit_by_ids(ids):
+    """حذف زيارات أولياء الأمور حسب قائمة من الـ id."""
+    if not ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    qmarks = ",".join("?" for _ in ids)
+    cur.execute(f"DELETE FROM parent_visits WHERE id IN ({qmarks})", ids)
+    conn.commit()
+    conn.close()
+
+
+def delete_parent_note(student_id: str, subject: str):
+    """حذف ملاحظة ولي أمر حسب الطالبة + المادة."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM parent_notes WHERE student_id = ? AND subject = ?",
+        (student_id, subject)
+    )
+    conn.commit()
+    conn.close()
 
 # ================= توليد PDF =================
 def export_report_A4_pdf_bytes(
@@ -610,7 +634,6 @@ def export_parent_visits_pdf(
     return buf.getvalue()
 
 
-
 # ================= واجهة Streamlit =================
 st.set_page_config(page_title="نظام أولياء الأمور", page_icon="📄", layout="centered")
 
@@ -624,6 +647,10 @@ except Exception as e:
 st.markdown("""
 <style>
 
+html, body, [data-testid="stAppViewContainer"] {
+    background-color: #f7f8fc !important;
+    color: #111827 !important;
+}
 
     .stApp {
         background-color: #f7f8fc;
@@ -940,8 +967,11 @@ if mode == "ولي الأمر":
                 if normalize_class(info["class"]) == selected_class:
                     # 👇 بدون الرقم المدني
                     label = info["name"]
+
+                    # لو تكرّر الاسم، نضيف الصف للتمييز (بدون إظهار الرقم)
                     if label in sid_for_label:
                         label = f"{info['name']} - {info['class']}"
+
                     students_options.append(label)
                     sid_for_label[label] = sid_key
 
@@ -1096,65 +1126,120 @@ elif mode == "الإدارة":
                     filtered = filtered[filtered["subject"] == selected_subject]
 
                 st.write(f"عدد السجلات: {len(filtered)}")
-                st.dataframe(filtered, use_container_width=True)
 
-                csv_bytes = filtered.to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    "تنزيل كملف Excel (CSV)",
-                    data=csv_bytes,
-                    file_name="parent_notes_export.csv",
-                    mime="text/csv"
-                )
+                if filtered.empty:
+                    st.info("لا توجد سجلات بعد تطبيق الفلاتر.")
+                else:
+                    # نضيف عمود اختيار للحذف
+                    filtered_for_edit = filtered.copy()
+                    filtered_for_edit["حذف؟"] = False
+
+                    edited = st.data_editor(
+                        filtered_for_edit,
+                        hide_index=True,
+                        use_container_width=True,
+                        key="notes_editor",
+                        column_config={
+                            "حذف؟": st.column_config.CheckboxColumn(
+                                "حذف؟",
+                                help="حددي السجلات التي تريدين حذفها"
+                            ),
+                        }
+                    )
+
+                    # للتصدير بدون عمود الحذف
+                    export_df = edited.drop(columns=["حذف؟"])
+                    csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "تنزيل كملف Excel (CSV)",
+                        data=csv_bytes,
+                        file_name="parent_notes_export.csv",
+                        mime="text/csv"
+                    )
+
+                    # زر الحذف
+                    if st.button("🗑️ حذف الملاحظات المحددة", type="secondary", key="delete_notes_btn"):
+                        to_delete = edited[edited["حذف؟"] == True]
+                        if to_delete.empty:
+                            st.warning("لم يتم اختيار أي سجل للحذف.")
+                        else:
+                            for _, row in to_delete.iterrows():
+                                # نحذف حسب الطالبة + المادة (المفتاح الفريد)
+                                delete_parent_note(row["student_id"], row["subject"])
+                            st.success(f"تم حذف {len(to_delete)} سجل/سجلات من ملاحظات أولياء الأمور.")
+                            st.rerun()
 
         with tab2:
-            visits_df = load_parent_visits_df()  # افتراضيًا عندك دالة ترجع الزيارات
+            visits_df = load_parent_visits_df()
 
             if visits_df.empty:
                 st.info("لا توجد زيارات مسجّلة حتى الآن.")
             else:
-                # قائمة الصفوف الموجودة في الزيارات
                 class_options = ["الكل"] + sorted(
                     visits_df["class"].dropna().unique().tolist()
                 )
 
                 selected_class = st.selectbox("فلتر حسب الصف", class_options, key="visits_class_filter")
 
-                # فلترة حسب الصف
                 filtered = visits_df.copy()
                 if selected_class != "الكل":
                     filtered = filtered[filtered["class"] == selected_class]
 
                 st.write(f"عدد السجلات: {len(filtered)}")
-                st.dataframe(filtered, use_container_width=True)
 
-                # تنزيل كـ Excel/CSV
-                csv_bytes = filtered.to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    "تنزيل زيارات أولياء الأمور كـ Excel (CSV)",
-                    data=csv_bytes,
-                    file_name="parent_visits_filtered.csv",
-                    mime="text/csv"
-                )
+                if filtered.empty:
+                    st.info("لا توجد سجلات بعد تطبيق الفلتر.")
+                else:
+                    # عمود اختيار للحذف
+                    filtered_for_edit = filtered.copy()
+                    filtered_for_edit["حذف؟"] = False
 
-                # 🔹 تنزيل كـ PDF
-                pdf_bytes = export_parent_visits_pdf(
-                    filtered,
-                    logo_path=ASSETS_LOGO,
-                    school_name=SCHOOL_NAME
-                )
+                    edited = st.data_editor(
+                        filtered_for_edit,
+                        hide_index=True,
+                        use_container_width=True,
+                        key="visits_editor",
+                        column_config={
+                            "حذف؟": st.column_config.CheckboxColumn(
+                                "حذف؟",
+                                help="اختيار الزيارات المطلوب حذفها"
+                            ),
+                            "id": st.column_config.Column("ID", disabled=True),
+                        }
+                    )
 
-                st.download_button(
-                    "⬇️ تنزيل تقرير زيارات أولياء الأمور (PDF)",
-                    data=pdf_bytes,
-                    file_name="parent_visits_report.pdf",
-                    mime="application/pdf"
-                )
+                    export_df = edited.drop(columns=["حذف؟"])
+                    csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "تنزيل زيارات أولياء الأمور كـ Excel (CSV)",
+                        data=csv_bytes,
+                        file_name="parent_visits_filtered.csv",
+                        mime="text/csv"
+                    )
+
+                    pdf_bytes = export_parent_visits_pdf(
+                        export_df,
+                        logo_path=ASSETS_LOGO,
+                        school_name=SCHOOL_NAME
+                    )
+                    st.download_button(
+                        "⬇️ تنزيل تقرير زيارات أولياء الأمور (PDF)",
+                        data=pdf_bytes,
+                        file_name="parent_visits_report.pdf",
+                        mime="application/pdf"
+                    )
+
+                    if st.button("🗑️ حذف الزيارات المحددة", type="secondary", key="delete_visits_btn"):
+                        to_delete = edited[edited["حذف؟"] == True]
+                        if to_delete.empty:
+                            st.warning("لم يتم اختيار أي زيارة للحذف.")
+                        else:
+                            ids = to_delete["id"].tolist()
+                            delete_parent_visit_by_ids(ids)
+                            st.success(f"تم حذف {len(ids)} زيارة/زيارات من السجل.")
+                            st.rerun()
 
         # زر خروج من لوحة الإدارة
         if st.button("🚪 تسجيل خروج الإدارة"):
             st.session_state.admin_logged_in = False
             st.rerun()
-
-
-
-
