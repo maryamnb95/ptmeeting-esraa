@@ -5,3 +5,5 @@ backgroundColor="#f7f8fc"
 secondaryBackgroundColor="#ffffff"
 textColor="#111827"
 font="sans serif"
+[ui]
+sidebar_expanded = true
