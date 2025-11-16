@@ -20,20 +20,16 @@ from bidi.algorithm import get_display
 
 # ================= إعدادات عامة =================
 SCHOOL_NAME = "ثانوية الإسراء بنات"
-INSTAGRAM_URL = "https://www.instagram.com/alesraa_highschool/"  # عدّلي هذا بالرابط الصحيح
+INSTAGRAM_URL = "https://www.instagram.com/alesraa_highschool/"
 INSTAGRAM_HANDLE = "@alesraa_highschool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_LOGO = os.path.join(BASE_DIR, "assets", "logo.PNG")
 DB_PATH = os.path.join(BASE_DIR, "data", "school.db")
 
-# كلمة مرور الإدارة (غيّريها كما تريدين أو استخدمي متغير بيئة)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "israa123")
 
 FONT_CANDIDATES = [
-    os.path.join(BASE_DIR, "fonts", "NotoNaskhArabic-Regular.ttf"),
-    os.path.join(BASE_DIR, "fonts", "Amiri-Regular.ttf"),
-    os.path.join(BASE_DIR, "fonts", "DUBAI-BOLD.TTF"),
-    os.path.join(BASE_DIR, "fonts", "Dubai-Regular.ttf"),
+    os.path.join(BASE_DIR, "fonts", "DUBAI-MEDIUM.TTF")
 ]
 
 def resolve_font_path() -> str:
@@ -42,10 +38,25 @@ def resolve_font_path() -> str:
             return p
     raise FileNotFoundError("أضيفي خطًا عربيًا داخل fonts/ مثل NotoNaskhArabic-Regular.ttf أو Amiri-Regular.ttf")
 
+# نستخدم خط خاص للـ PDF يكون واضح للطباعة
 def ensure_pdf_font():
-    font_path = resolve_font_path()
+    # جرّب Amiri أولاً، إذا مو موجود استخدم NotoNaskh
+    cand_paths = [
+        os.path.join(BASE_DIR, "fonts", "Amiri-Regular.ttf"),
+        os.path.join(BASE_DIR, "fonts", "NotoNaskhArabic-Regular.ttf"),
+    ]
+    font_path = None
+    for p in cand_paths:
+        if os.path.exists(p):
+            font_path = p
+            break
+
+    if font_path is None:
+        raise FileNotFoundError("ضعي إما Amiri-Regular.ttf أو NotoNaskhArabic-Regular.ttf داخل مجلد fonts/")
+
     if "ARFont" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("ARFont", font_path))
+
     return "ARFont", font_path
 
 # ================= أدوات عربية =================
@@ -86,7 +97,6 @@ def normalize_sid(s: str) -> str:
     return only_digits or s
 
 def normalize_class(c):
-    """توحيد شكل اسم الصف (إزالة مسافات إضافية وما حول /)."""
     if not c:
         return ""
     c = str(c).strip()
@@ -95,34 +105,26 @@ def normalize_class(c):
     return c
 
 def wrap_ar_lines(text: str, max_width: float, font_name: str, font_size: int, c: canvas.Canvas):
-    """
-    تقسيم الملاحظة إلى أسطر، كل سطر يحتوي 5 كلمات بالحد الأقصى.
-    نعتمد على عدد الكلمات (ليس عرض الصفحة) لسهولة القراءة.
-    """
     text = (text or "").strip()
     if not text:
         return []
-
     words = text.split()
     lines = []
     current = []
-
     for w in words:
         current.append(w)
-        if len(current) == 4:   # 👈 خمس كلمات
+        if len(current) == 4:   # ٤ كلمات في السطر
             lines.append(" ".join(current))
             current = []
-
     if current:
         lines.append(" ".join(current))
-
     return lines
 
 # ================= بيانات من SQLite =================
-_STUDENTS_INDEX = {}   # sid -> {name, class}
-_CLASS_MAP = {}        # class -> list[{subject, teacher}]
-_OVERRIDES = {}        # (sid, subject) -> teacher
-_DB_PARENT_NOTES = {}  # (sid, subject) -> note
+_STUDENTS_INDEX = {}
+_CLASS_MAP = {}
+_OVERRIDES = {}
+_DB_PARENT_NOTES = {}
 
 def load_school_data_from_sqlite(db_path: str):
     _STUDENTS_INDEX.clear(); _CLASS_MAP.clear(); _OVERRIDES.clear(); _DB_PARENT_NOTES.clear()
@@ -130,7 +132,6 @@ def load_school_data_from_sqlite(db_path: str):
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # students
     cur.execute("SELECT student_id, name, class FROM students")
     for r in cur.fetchall():
         sid = normalize_sid(r["student_id"])
@@ -140,7 +141,6 @@ def load_school_data_from_sqlite(db_path: str):
         if sid and name and cls:
             _STUDENTS_INDEX[sid] = {"name": name, "class": cls}
 
-    # class_subjects
     cur.execute("SELECT class, subject, teacher FROM class_subjects ORDER BY class, subject")
     for r in cur.fetchall():
         cls_raw = strip_invisibles((r["class"] or "").strip())
@@ -150,7 +150,6 @@ def load_school_data_from_sqlite(db_path: str):
         if cls and subject and teacher:
             _CLASS_MAP.setdefault(cls, []).append({"subject": subject, "teacher": teacher})
 
-    # student_subjects (اختياري)
     try:
         cur.execute("SELECT student_id, subject, teacher FROM student_subjects")
         for r in cur.fetchall():
@@ -161,7 +160,6 @@ def load_school_data_from_sqlite(db_path: str):
     except sqlite3.OperationalError:
         pass
 
-    # parent_notes (اختياري)
     try:
         cur.execute("SELECT student_id, subject, note FROM parent_notes")
         for r in cur.fetchall():
@@ -243,7 +241,6 @@ def load_parent_notes_df():
 
 # ===== تسجيل زيارات أولياء الأمور =====
 def log_parent_visit(student_id: str, parent_name: str, parent_relation: str):
-    """تسجيل اسم ولي الأمر + صلة القرابة + الطالبة في جدول مستقل."""
     if not parent_name.strip():
         return
     conn = sqlite3.connect(DB_PATH)
@@ -352,7 +349,6 @@ def export_report_A4_pdf_bytes(
 
     y = TOP_Y
 
-    # الشعار
     if logo_path and os.path.exists(logo_path):
         try:
             im = Image.open(logo_path)
@@ -377,7 +373,6 @@ def export_report_A4_pdf_bytes(
             c.setFillColorRGB(0, 0, 0)
             y -= 14
 
-    # اسم المدرسة والعنوان
     c.setFont(font_name, 18)
     c.setFillColorRGB(0,0,0)
     c.drawCentredString(page_w/2, y, ar_shape(sanitize_text(school_name)))
@@ -388,7 +383,6 @@ def export_report_A4_pdf_bytes(
     c.drawCentredString(page_w/2, y, ar_shape("تقرير ملاحظات ولي الأمر"))
     y -= 16
 
-    # بيانات ولي الأمر
     if parent_name or parent_relation:
         parent_line = ""
         if parent_name:
@@ -405,13 +399,11 @@ def export_report_A4_pdf_bytes(
     c.setFillColorRGB(0,0,0)
     y -= HEADER_GAP
 
-    # خط فاصل
     c.setLineWidth(LINE_THIN)
     c.setStrokeColorRGB(0.82, 0.84, 0.88)
     c.line(MARGIN, y, page_w - MARGIN, y)
     y -= 14
 
-    # بيانات الطالبة
     c.setFont(font_name, 12)
     c.drawRightString(x_right, y, ar_shape(f"الطالب: {student['name']}")); y -= ROW_LEADING
     c.drawRightString(x_right, y, ar_shape(f"الرقم: {student_id}"));       y -= (ROW_LEADING - 2)
@@ -419,7 +411,6 @@ def export_report_A4_pdf_bytes(
 
     c.line(MARGIN, y, page_w - MARGIN, y); y -= 14
 
-    # رؤوس الأعمدة
     c.setFont(font_name, 12)
     col_subject_x = x_right
     col_teacher_x = x_right - 240
@@ -435,7 +426,6 @@ def export_report_A4_pdf_bytes(
     c.line(MARGIN, y, page_w - MARGIN, y)
     y -= 10
 
-    # صفوف المواد
     c.setFont(font_name, 11)
     for sub in student.get("subjects", []):
         subject = sanitize_text(sub.get("subject",""))
@@ -452,7 +442,6 @@ def export_report_A4_pdf_bytes(
             for ln in lines:
                 c.drawString(x_note_left, y, ar_shape(ln))
                 y -= NOTE_LEADING
-
             y -= 10
             c.setFillColorRGB(0, 0, 0)
         else:
@@ -529,10 +518,9 @@ def export_parent_visits_pdf(
     MARGIN = 36
     TOP_Y = page_h - MARGIN
     ROW_HEIGHT = 22
-    HEADER_BG = (0.23, 0.47, 0.96)   # أزرق ملكي للرأس
+    HEADER_BG = (0.23, 0.47, 0.96)
     BORDER_COLOR = (0.75, 0.75, 0.75)
 
-    # أعمدة الجدول
     columns = [
         ("ولي الأمر", 140),
         ("صلة القرابة", 100),
@@ -581,7 +569,6 @@ def export_parent_visits_pdf(
         c.setFillColorRGB(*BORDER_COLOR)
         c.rect(x_start, y, total_width, ROW_HEIGHT, fill=0)
 
-    # ---------- رأس الصفحة ----------
     y = TOP_Y
 
     if logo_path and os.path.exists(logo_path):
@@ -614,7 +601,6 @@ def export_parent_visits_pdf(
     c.drawCentredString(page_w/2, y, ar_shape("تقرير زيارات أولياء الأمور"))
     y -= 25
 
-    # ---------- جدول ----------
     draw_header(y)
     y -= ROW_HEIGHT
 
@@ -633,180 +619,186 @@ def export_parent_visits_pdf(
     buf.seek(0)
     return buf.getvalue()
 
-
 # ================= واجهة Streamlit =================
 st.set_page_config(page_title="نظام أولياء الأمور", page_icon="📄", layout="centered")
 
-# تحميل قاعدة البيانات
 try:
     load_school_data_from_sqlite(DB_PATH)
 except Exception as e:
     st.error(f"خطأ في تحميل قاعدة البيانات: {e}")
 
-# ========== CSS ==========
+# ========== CSS عام + موبايل + إخفاء Sidebar في الموبايل + Bottom Nav ==========
+
 st.markdown("""
 <style>
+@font-face {
+    font-family: 'Dubai';
+    src: url('assets/fonts/DUBAI-MEDIUM.TTF');
+}
 
-html, body, [data-testid="stAppViewContainer"] {
+html, body, * {
+    font-family: 'Dubai', sans-serif !important;
+}
+body {
     background-color: #f7f8fc !important;
     color: #111827 !important;
 }
 
-    .stApp {
-        background-color: #f7f8fc;
-        font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-    }
+.stApp {
+    background-color: #f7f8fc;
+}
 
-    .card {
-        background: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border: none !important;
-        box-shadow: none !important;
-    }
+.card {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+}
 
+.student-card {
+    background: #3b82f6;
+    padding: 1.4rem;
+    border-radius: 18px;
+    box-shadow: 0px 3px 8px rgba(0,0,0,0.15);
+    color: #ffffff;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    max-width: 680px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.student-card h3 {
+    margin: 0 0 4px 0;
+    font-weight: 800;
+    font-size: 1.1rem;
+}
+.student-card p {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.subject-row {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.subject-title,
+.teacher-title {
+    background: #0BAF9A;
+    padding: 6px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    font-size: 1.0rem;
+}
+
+textarea {
+    background: #ffffff !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 10px !important;
+    color: #1e1e2f !important;
+}
+
+.stButton>button[kind="primary"] {
+    background: #3b82f6;
+    color: white;
+    padding: 0.6rem 1.2rem;
+    border-radius: 10px;
+    border: none;
+    font-size: 1rem;
+}
+.stButton>button[kind="primary"]:hover {
+    background: #2563eb;
+}
+
+.stButton>button[kind="secondary"] {
+    background: #0BAF9A;
+    color: #ffffff;
+    padding: 0.5rem 1rem;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.95rem;
+}
+.stButton>button[kind="secondary"]:hover {
+    background: #089E8A;
+}
+
+.title-main {
+    font-size: 1.7rem;
+    font-weight: 800;
+    text-align: center;
+    color: #1e1e2f;
+    margin-top: -12px;
+}
+.subtitle-main {
+    text-align: center;
+    color: #6b7280;
+    margin-bottom: 1.5rem;
+}
+
+/* 📱 موبايل: تصغير بعض العناصر */
+@media (max-width: 768px) {
     .student-card {
-        background: #3b82f6;
-        padding: 1.4rem;
-        border-radius: 18px;
-        box-shadow: 0px 3px 8px rgba(0,0,0,0.15);
-        color: #ffffff;
-        margin-bottom: 1.5rem;
-        text-align: center;
-        max-width: 680px;
-        margin-left: auto;
-        margin-right: auto;
+        padding: 1rem 0.9rem;
+        border-radius: 16px;
+        margin-bottom: 1rem;
     }
     .student-card h3 {
-        margin: 0 0 4px 0;
-        font-weight: 800;
-        font-size: 1.1rem;
+        font-size: 1rem;
     }
     .student-card p {
-        margin: 0;
-        font-size: 0.95rem;
+        font-size: 0.85rem;
     }
 
     .subject-row {
-        display: flex;
-        flex-direction: row-reverse;
-        align-items: center;
-        justify-content: center;
-        gap: 0.7rem;
-        margin-bottom: 0.4rem;
-        flex-wrap: wrap;
+        gap: 0.4rem;
     }
-
     .subject-title,
     .teacher-title {
-        background: #3b82f6;
-        padding: 6px 10px;
-        border-radius: 10px;
-        font-weight: 600;
-        color: #ffffff;
-        white-space: nowrap;
+        font-size: 0.8rem;
+        padding: 5px 8px;
+    }
+
+    .stButton>button[kind="primary"],
+    .stButton>button[kind="secondary"] {
+        width: 100%;
         font-size: 0.9rem;
     }
 
     textarea {
-        background: #ffffff !important;
-        border: 1px solid #d1d5db !important;
-        border-radius: 10px !important;
-        color: #1e1e2f !important;
-    }
-
-    .stButton>button[kind="primary"] {
-        background: #3b82f6;
-        color: white;
-        padding: 0.6rem 1.2rem;
-        border-radius: 10px;
-        border: none;
-        font-size: 1rem;
-    }
-    .stButton>button[kind="primary"]:hover {
-        background: #2563eb;
-    }
-
-    .stButton>button[kind="secondary"] {
-        background: #0BAF9A;
-        color: #ffffff;
-        padding: 0.5rem 1rem;
-        border-radius: 10px;
-        border: none;
-        font-size: 0.95rem;
-    }
-    .stButton>button[kind="secondary"]:hover {
-        background: #089E8A;
+        font-size: 0.85rem !important;
     }
 
     .title-main {
-        font-size: 1.7rem;
-        font-weight: 800;
-        text-align: center;
-        color: #1e1e2f;
-        margin-top: -12px;
+        font-size: 1.3rem;
     }
     .subtitle-main {
-        text-align: center;
-        color: #6b7280;
-        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
     }
 
-    /* 📱 تنسيق خاص للشاشات الصغيرة (موبايل) */
-    @media (max-width: 768px) {
-        .student-card {
-            padding: 1rem 0.9rem;
-            border-radius: 16px;
-            margin-bottom: 1rem;
-        }
-        .student-card h3 {
-            font-size: 1rem;
-        }
-        .student-card p {
-            font-size: 0.85rem;
-        }
-
-        .subject-row {
-            gap: 0.4rem;
-        }
-        .subject-title,
-        .teacher-title {
-            font-size: 0.8rem;
-            padding: 5px 8px;
-        }
-
-        .stButton>button[kind="primary"],
-        .stButton>button[kind="secondary"] {
-            width: 100%;
-            font-size: 0.9rem;
-        }
-
-        textarea {
-            font-size: 0.85rem !important;
-        }
-
-        .title-main {
-            font-size: 1.3rem;
-        }
-        .subtitle-main {
-            font-size: 0.9rem;
-        }
+    /* إخفاء Sidebar على الموبايل */
+    [data-testid="stSidebar"] {
+        display: none !important;
     }
-</style>
-""", unsafe_allow_html=True)
+}
 
-st.markdown("""
-<style>
+/* ... باقي الـ CSS فوقه خليه مثل ما هو ... */
+
+/* Footer Instagram عادي في أسفل الصفحة (مو ثابت) */
 .footer-fixed {
-    position: fixed;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
     text-align: center;
     font-size: 0.9rem;
     color: #4b5563;
-    opacity: 0.95;
-    z-index: 9999;
+    opacity: 0.98;
+    margin-top: 3rem;
+    padding-top: 0.5rem;
 }
 
 .footer-fixed a {
@@ -821,29 +813,24 @@ st.markdown("""
     margin-left: 6px;
 }
 
-/* 📱 تصغير الفوتر على الشاشات الصغيرة */
+/* 📱 تصغير بسيط على الموبايل */
 @media (max-width: 768px) {
     .footer-fixed {
         font-size: 0.8rem;
-        bottom: 8px;
+        margin-top: 2rem;
     }
     .footer-fixed img {
         width: 16px;
         margin-left: 4px;
     }
 }
+
+/* مو محتاجين padding كبير تحت لأن الفوتر ما صار ثابت */
+.block-container {
+    padding-bottom: 2rem;
+}
 </style>
-
-<div class="footer-fixed">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png">
-    <a href="https://www.instagram.com/alesraa_highschool" target="_blank">
-        @alesraa_highschool
-    </a>
-    <br>
-    تصميم النظام قسم الحاسوب — أ. مريم بورسلي
-</div>
 """, unsafe_allow_html=True)
-
 
 # ===== حالة الجلسة =====
 if "step" not in st.session_state:
@@ -860,6 +847,8 @@ if "logged_visit_sid" not in st.session_state:
     st.session_state.logged_visit_sid = None
 if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
+if "mode" not in st.session_state:
+    st.session_state.mode = "ولي الأمر"
 
 # الشعار والعنوان
 def load_base64_image(path):
@@ -879,17 +868,24 @@ st.markdown(f"<div class='title-main'>نظام عرض بيانات الطالب 
 st.markdown(f"<div class='subtitle-main'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
 st.caption(f"👩‍🎓 عدد الطالبات المحملة من القاعدة: {len(_STUDENTS_INDEX)}")
 
-# وضع الاستخدام
+# وضع الاستخدام (Sidebar لسطح المكتب)
 with st.sidebar:
     st.markdown("### وضع الاستخدام")
-    mode = st.radio("اختر:", ["ولي الأمر", "الإدارة"], label_visibility="collapsed")
+    mode_choice = st.radio(
+        "اختر:",
+        ["ولي الأمر", "الإدارة"],
+        index=0 if st.session_state.mode == "ولي الأمر" else 1,
+        label_visibility="collapsed",
+        key="mode_radio"
+    )
+    st.session_state.mode = mode_choice
 
     st.markdown("### بيانات ولي الأمر")
     st.write(f"**الاسم:** {st.session_state.get('parent_name', '—')}")
     st.write(f"**صلة القرابة:** {st.session_state.get('parent_relation', '—')}")
 
-    if mode == "ولي الأمر" and st.session_state.step >= 3:
-        if st.button("⬅️ تغيير الطالبة", type="primary"):
+    if st.session_state.mode == "ولي الأمر" and st.session_state.step >= 3:
+        if st.button("⬅️ تغيير الطالبة", type="primary", key="change_student_sidebar"):
             st.session_state.step = 2
             st.session_state.selected_sid = None
             st.session_state.current_record = None
@@ -897,9 +893,8 @@ with st.sidebar:
             st.rerun()
 
 # ================= وضع ولي الأمر =================
-if mode == "ولي الأمر":
+if st.session_state.mode == "ولي الأمر":
 
-    # -------- الخطوة 1: بيانات ولي الأمر --------
     if st.session_state.step == 1:
         st.subheader("بيانات ولي الأمر")
 
@@ -942,7 +937,6 @@ if mode == "ولي الأمر":
                 st.success("تم تسجيل بيانات ولي الأمر. يمكنك الآن اختيار الصف والطالبة.")
                 st.rerun()
 
-    # -------- الخطوة 2: اختيار الصف والطالبة --------
     elif st.session_state.step == 2:
         st.subheader("اختيار الطالبة")
 
@@ -965,13 +959,7 @@ if mode == "ولي الأمر":
         if selected_class != class_placeholder and all_classes:
             for sid_key, info in _STUDENTS_INDEX.items():
                 if normalize_class(info["class"]) == selected_class:
-                    # 👇 بدون الرقم المدني
-                    label = info["name"]
-
-                    # لو تكرّر الاسم، نضيف الصف للتمييز (بدون إظهار الرقم)
-                    if label in sid_for_label:
-                        label = f"{info['name']} - {info['class']}"
-
+                    label = f"{info['name']}"
                     students_options.append(label)
                     sid_for_label[label] = sid_key
 
@@ -997,30 +985,58 @@ if mode == "ولي الأمر":
                     st.session_state.logged_visit_sid = None
                     st.rerun()
 
-    # -------- الخطوة 3: المواد + الملاحظات + تقرير --------
+
     elif st.session_state.step >= 3:
+
         if not st.session_state.selected_sid or not st.session_state.current_record:
+
             st.error("لم يتم اختيار طالبة بعد. الرجاء الرجوع للخطوة السابقة.")
+
         else:
+
             sid = st.session_state.selected_sid
+
             rec = st.session_state.current_record
 
+            # زر تغيير الطالبة داخل المحتوى
+
+            col_btn, _ = st.columns([1, 4])
+
+            with col_btn:
+
+                if st.button("⬅️ تغيير الطالبة", key="change_student_main", type="secondary", use_container_width=True):
+                    st.session_state.step = 2
+
+                    st.session_state.selected_sid = None
+
+                    st.session_state.current_record = None
+
+                    st.session_state.logged_visit_sid = None
+
+                    st.rerun()
+
             # تسجيل زيارة ولي الأمر للطالبة (مرة واحدة لكل طالبة في الجلسة)
+
             if st.session_state.logged_visit_sid != sid:
                 log_parent_visit(
+
                     sid,
+
                     st.session_state.get("parent_name", ""),
+
                     st.session_state.get("parent_relation", "")
+
                 )
+
                 st.session_state.logged_visit_sid = sid
 
             st.markdown(
                 f"""
-                <div class="student-card">
-                    <h3>الطالبة: {rec['name']}</h3>
-                    <p>الصف: {rec['class']} — الرقم: {sid}</p>
-                </div>
-                """,
+            <div class="student-card">
+                <h3>الطالبة: {rec['name']}</h3>
+                <p>الصف: {rec['class']} : الرقم  -  {sid}</p>
+            </div>
+            """,
                 unsafe_allow_html=True,
             )
 
@@ -1048,13 +1064,6 @@ if mode == "ولي الأمر":
                     height=80
                 )
                 updated_notes.append(new_note)
-
-                col_save, _ = st.columns([1, 5])
-                with col_save:
-                    if st.button("حفظ هذه المادة", key=f"save_{i}", use_container_width=True, type="secondary"):
-                        row["parent_note"] = new_note
-                        save_subject_note_to_db(sid, row["subject"], new_note)
-                        st.success("تم حفظ ملاحظة هذه المادة")
 
             if st.button("💾 حفظ جميع الملاحظات", type="primary"):
                 for i, row in enumerate(rec.get("subjects", [])):
@@ -1090,8 +1099,7 @@ if mode == "ولي الأمر":
             )
 
 # ================= وضع الإدارة =================
-elif mode == "الإدارة":
-    # شاشة تسجيل الدخول للإدارة
+elif st.session_state.mode == "الإدارة":
     if not st.session_state.admin_logged_in:
         st.subheader("تسجيل دخول الإدارة")
         pwd = st.text_input("كلمة مرور الإدارة", type="password")
@@ -1239,7 +1247,20 @@ elif mode == "الإدارة":
                             st.success(f"تم حذف {len(ids)} زيارة/زيارات من السجل.")
                             st.rerun()
 
-        # زر خروج من لوحة الإدارة
         if st.button("🚪 تسجيل خروج الإدارة"):
             st.session_state.admin_logged_in = False
             st.rerun()
+# ===== فوتر ثابت في أسفل الصفحة (يظهر بعد كل المحتوى) =====
+st.markdown(
+    f"""
+<div class="footer-fixed">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png">
+    <a href="{INSTAGRAM_URL}" target="_blank">
+        {INSTAGRAM_HANDLE}
+    </a>
+    <br>
+    تصميم النظام قسم الحاسوب — أ. مريم بورسلي
+</div>
+""",
+    unsafe_allow_html=True,
+)
