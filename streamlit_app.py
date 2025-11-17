@@ -633,11 +633,11 @@ st.markdown("""
 <style>
 @font-face {
     font-family: 'Dubai';
-    src: url('assets/fonts/DUBAI-MEDIUM.TTF');
+    src: url('fonts/DUBAI-MEDIUM.TTF');
 }
 
-html, body, * {
-    font-family: 'Dubai', sans-serif !important;
+html, body{
+    font-family: 'Dubai', sans-serif ;
 }
 body {
     background-color: #f7f8fc !important;
@@ -647,7 +647,9 @@ body {
 .stApp {
     background-color: #f7f8fc;
 }
-
+.stApp, .stMarkdown, .stButton > button, textarea {
+    font-family: 'Dubai', sans-serif;
+}
 .card {
     background: transparent !important;
     padding: 0 !important;
